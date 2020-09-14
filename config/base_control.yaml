@@ -1,0 +1,8 @@
+whole_body_controller/base:
+  odom_x_joint: &odom_x_joint odom_x_joint
+  odom_y_joint: &odom_y_joint odom_y_joint
+  odom_z_joint: &odom_z_joint odom_z_joint
+  joints:
+    - *odom_x_joint
+    - *odom_y_joint
+    - *odom_z_joint
