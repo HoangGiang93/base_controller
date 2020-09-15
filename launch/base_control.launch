@@ -1,12 +1,11 @@
 <launch>
-    <arg name="name_space" default="whole_body_controller/base"/>
-    <rosparam command="load" file="$(find base_control)/config/base_control.yaml" />
+    <arg name="name_space" default="iai_donbot/whole_body_controller/base"/>
+    <rosparam command="load" ns="iai_donbot" file="$(find base_control)/config/base_control.yaml" />
     <node pkg="base_control" type="base_control.py" name="base_control" output="screen">
-        <!-- <remap from="robot_description" to="giskard/robot_description"/>
         <remap from="~/cmd_vel" to="/base_controller/command"/>
-        <remap from="/joint_states" to="/base/joint_states"/>  -->
-        <!-- <remap from="~follow_joint_trajectory" to="/whole_body_controller/base/follow_joint_trajectory"/> -->
-        <!-- <remap from="~state" to="/whole_body_controller/base/state"/> -->
+        <remap from="/joint_states" to="/iai_donbot/base/joint_states"/> 
+        <!-- <remap from="~follow_joint_trajectory" to="/iai_donbot/whole_body_controller/base/follow_joint_trajectory"/> -->
+        <!-- <remap from="~state" to="/iai_donbot/whole_body_controller/base/state"/> -->
         <param name="name_space" value="$(arg name_space)"/>
         <!-- <param name="vel_tolerance" value="0.01"/> -->
     </node>
