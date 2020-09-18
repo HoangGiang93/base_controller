@@ -22,7 +22,7 @@ class BaseControl(object):
   def __init__(self):
     self.cmd_vel_pub = rospy.Publisher('~cmd_vel', Twist, queue_size=10)
 
-    joint_states = rospy.wait_for_message('/joint_states', JointState)
+    joint_states = rospy.wait_for_message('base/joint_states', JointState)
     try:
       self.odom_x_joint_index = joint_states.name.index(odom_x_joint)
       self.odom_y_joint_index = joint_states.name.index(odom_y_joint)
@@ -32,9 +32,6 @@ class BaseControl(object):
     except ValueError as e:
       rospy.logwarn("base_controller couldn't find odom joints in joint states!")
       return
-    
-    # create joint states subscriber
-    self.joint_states_sub = rospy.Subscriber('/joint_states', JointState, self.joint_states_callback, queue_size=10)
 
     # create tf listener
     self.tf_listener = tf.TransformListener()
@@ -48,13 +45,13 @@ class BaseControl(object):
 
   def joint_states_callback(self, joint_states):
     try:
-      self.tf_listener.waitForTransform("odom_origin", "base_footprint", rospy.Time(), rospy.Duration(10))
+      self.tf_listener.waitForTransform("odom", "base_footprint", rospy.Time(), rospy.Duration(10))
     except TransformException as e:
-      rospy.logwarn("base_contronller couldn't find odom_origin frame")
+      rospy.logwarn("base_contronller couldn't find odom frame")
       return
       
-    t = self.tf_listener.getLatestCommonTime("odom_origin", "base_footprint")
-    position, quaternion = self.tf_listener.lookupTransform("odom_origin", "base_footprint", t)
+    t = self.tf_listener.getLatestCommonTime("odom", "base_footprint")
+    position, quaternion = self.tf_listener.lookupTransform("odom", "base_footprint", t)
     euler = tf.transformations.euler_from_quaternion(quaternion)
     self._state.actual.positions = [position[0], position[1], euler[2]]
 
@@ -72,7 +69,6 @@ class BaseControl(object):
 
   def goal_callback(self, goal):
     # helper variables
-    rate = rospy.Rate(20) # TODO: Change hardcode
     success = True
     
     try:
@@ -102,7 +98,12 @@ class BaseControl(object):
       if sum([abs(error[i][j]) for i in range(2) for j in range(3)]) < 0.01:
         success = True
         break
-      
+
+      time_from_start = rospy.Time.now() - time_start
+      if time_from_start.secs > 60:
+        success = True
+        break
+
       error_odom_x_pos = goal.trajectory.points[t].positions[goal_odom_x_joint_index] - self._state.actual.positions[0]
       error_odom_y_pos = goal.trajectory.points[t].positions[goal_odom_y_joint_index] - self._state.actual.positions[1]
       error_odom_z_pos = goal.trajectory.points[t].positions[goal_odom_z_joint_index] - self._state.actual.positions[2]
@@ -111,7 +112,6 @@ class BaseControl(object):
       error_odom_y_vel = goal.trajectory.points[t].velocities[goal_odom_y_joint_index] - self._state.actual.velocities[1]
       error_odom_z_vel = goal.trajectory.points[t].velocities[goal_odom_z_joint_index] - self._state.actual.velocities[2]
 
-      time_from_start = rospy.Time.now() - time_start
       self._feedback.feedback.header.stamp = rospy.Time.now()
       self._feedback.feedback.header.frame_id = self._state.header.frame_id
       self._feedback.feedback.joint_names = self._state.joint_names
@@ -140,11 +140,11 @@ class BaseControl(object):
         v_y = 0
         v_z = 0
         t = -1
-
+        
       # add feedback control
       v_x += 0.5 * error_odom_x_pos + 0.1 * error_odom_x_vel
       v_y += 0.5 * error_odom_y_pos + 0.1 * error_odom_y_vel
-      v_z += 0.5 * error_odom_z_pos + 0.1 * error_odom_z_vel
+      # v_z += 0.5 * error_odom_z_pos + 0.1 * error_odom_z_vel
 
       # transform velocities from map fram to base frame
       sin_z = math.sin(self._state.actual.positions[2])
