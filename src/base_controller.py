@@ -39,6 +39,8 @@ class BaseControl(object):
     # create state publisher
     self.state_pub = rospy.Publisher('{}/state'.format(name_space), JointTrajectoryControllerState, queue_size=10)
 
+    self.state_sub = rospy.Subscriber('base/joint_states', JointState, self.joint_states_callback, queue_size=10)
+
     # create the action server
     self._as = actionlib.SimpleActionServer('{}/follow_joint_trajectory'.format(name_space), FollowJointTrajectoryAction, self.goal_callback, False)
     self._as.start()
@@ -47,7 +49,7 @@ class BaseControl(object):
     try:
       self.tf_listener.waitForTransform("odom", "base_footprint", rospy.Time(), rospy.Duration(10))
     except TransformException as e:
-      rospy.logwarn("base_contronller couldn't find odom frame")
+      rospy.logwarn("base_controller couldn't find odom frame")
       return
       
     t = self.tf_listener.getLatestCommonTime("odom", "base_footprint")
@@ -70,6 +72,7 @@ class BaseControl(object):
   def goal_callback(self, goal):
     # helper variables
     success = True
+    rate = rospy.Rate(20)
     
     try:
       goal_odom_x_joint_index = goal.trajectory.joint_names.index(odom_x_joint)
