@@ -35,6 +35,7 @@ class BaseControl(object):
 
     # create tf listener
     self.tf_listener = tf.TransformListener()
+    self.tf_broadcaster = tf.TransformBroadcaster()
 
     # create state publisher
     self.state_pub = rospy.Publisher('{}/state'.format(name_space), JointTrajectoryControllerState, queue_size=10)
@@ -45,17 +46,48 @@ class BaseControl(object):
     self._as = actionlib.SimpleActionServer('{}/follow_joint_trajectory'.format(name_space), FollowJointTrajectoryAction, self.goal_callback, False)
     self._as.start()
 
-  def joint_states_callback(self, joint_states):
+  def calc_odom_origin(self):
     try:
-      self.tf_listener.waitForTransform("odom", "base_footprint", rospy.Time(), rospy.Duration(10))
+      self.tf_listener.waitForTransform("map", "odom", rospy.Time(), rospy.Duration(10))
     except TransformException as e:
       rospy.logwarn("base_controller couldn't find odom frame")
+
+    t = self.tf_listener.getLatestCommonTime("map", "odom")
+    return self.tf_listener.lookupTransform("map", "odom", t)
+
+  def joint_states_callback(self, joint_states):
+    try:
+      self.tf_listener.waitForTransform("odom_origin", "base_footprint", rospy.Time(), rospy.Duration(1))
+    except TransformException as e:
+      rospy.logwarn("base_controller couldn't find odom_origin frame, use odom frame instead")
+
+      t = self.tf_listener.getLatestCommonTime("odom", "base_footprint")
+      position, quaternion = self.tf_listener.lookupTransform("odom", "base_footprint", t)
+      euler = tf.transformations.euler_from_quaternion(quaternion)
+      self._state.actual.positions = [position[0], position[1], euler[2]]
+
+      try:
+        self._state.actual.velocities = [joint_states.velocity[self.odom_x_joint_index], joint_states.velocity[self.odom_y_joint_index], joint_states.velocity[self.odom_z_joint_index]]
+        # rospy.loginfo("base_controller found odom joint velocities")
+      except IndexError as e:
+        rospy.logwarn("base_controller couldn't find enough odom joint velocities in joint states!")
+        return
+        
+      self._state.header.stamp = rospy.Time.now()
+      self._state.header.frame_id = joint_states.header.frame_id
+      self._state.joint_names = joint_states.name
+      self.state_pub.publish(self._state)
       return
       
-    t = self.tf_listener.getLatestCommonTime("odom", "base_footprint")
-    position, quaternion = self.tf_listener.lookupTransform("odom", "base_footprint", t)
+    t = self.tf_listener.getLatestCommonTime("odom_origin", "base_footprint")
+    position, quaternion = self.tf_listener.lookupTransform("odom_origin", "base_footprint", t)
     euler = tf.transformations.euler_from_quaternion(quaternion)
-    self._state.actual.positions = [position[0], position[1], euler[2]]
+    pos_z = euler[2]
+    if self._state.actual.positions[2] - pos_z > math.pi:
+      pos_z += 2 * math.pi
+    elif self._state.actual.positions[2] - pos_z < -math.pi:
+      pos_z -= 2 * math.pi
+    self._state.actual.positions = [position[0], position[1], pos_z]
 
     try:
       self._state.actual.velocities = [joint_states.velocity[self.odom_x_joint_index], joint_states.velocity[self.odom_y_joint_index], joint_states.velocity[self.odom_z_joint_index]]
@@ -83,10 +115,16 @@ class BaseControl(object):
       self._as.set_aborted()
       return
 
+    odom_origin_pos, odom_origin_quat = self.calc_odom_origin()
+
     # initialize cmd_vel and time index t
     cmd_vel = Twist()
     t = 0
     time_start = rospy.Time.now()
+    self._state.actual.positions[2] = self._state.actual.positions[2] % (2 * math.pi)
+    if self._state.actual.positions[2] > math.pi:
+      self._state.actual.positions[2] -= 2 * math.pi
+
     while True:
       if self._as.is_preempt_requested():
         rospy.loginfo("The goal has been preempted")
@@ -94,6 +132,12 @@ class BaseControl(object):
         self._as.set_preempted()
         success = False
         break
+
+      self.tf_broadcaster.sendTransform(odom_origin_pos,
+                     odom_origin_quat,
+                     rospy.Time.now(),
+                     "odom_origin",
+                     "map")
 
       # goal error
       error = [[goal.trajectory.points[-1].positions[i] - self._state.actual.positions[i] for i in range(3)], [goal.trajectory.points[-1].velocities[i] - self._state.actual.velocities[i] for i in range(3)]]
@@ -147,7 +191,7 @@ class BaseControl(object):
       # add feedback control
       v_x += 0.5 * error_odom_x_pos + 0.1 * error_odom_x_vel
       v_y += 0.5 * error_odom_y_pos + 0.1 * error_odom_y_vel
-      # v_z += 0.5 * error_odom_z_pos + 0.1 * error_odom_z_vel
+      v_z += 0.05 * error_odom_z_pos + 0.2 * error_odom_z_vel
 
       # transform velocities from map fram to base frame
       sin_z = math.sin(self._state.actual.positions[2])
