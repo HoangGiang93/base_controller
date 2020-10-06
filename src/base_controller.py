@@ -7,7 +7,7 @@ from control_msgs.msg import JointTrajectoryControllerState
 from control_msgs.msg import FollowJointTrajectoryAction, FollowJointTrajectoryActionFeedback, FollowJointTrajectoryActionResult, FollowJointTrajectoryActionGoal
 from geometry_msgs.msg import Twist, Pose, Quaternion
 from sensor_msgs.msg import JointState
-
+from angles import shortest_angular_distance
 import tf
 from tf2_ros import TransformException
 
@@ -120,6 +120,8 @@ class BaseControl(object):
     # initialize cmd_vel and time index t
     cmd_vel = Twist()
     t = 0
+    t_finish = 0
+
     time_start = rospy.Time.now()
     self._state.actual.positions[2] = self._state.actual.positions[2] % (2 * math.pi)
     if self._state.actual.positions[2] > math.pi:
@@ -151,9 +153,12 @@ class BaseControl(object):
         success = True
         break
 
+      if t_finish > 5:
+        break
+
       error_odom_x_pos = goal.trajectory.points[t].positions[goal_odom_x_joint_index] - self._state.actual.positions[0]
       error_odom_y_pos = goal.trajectory.points[t].positions[goal_odom_y_joint_index] - self._state.actual.positions[1]
-      error_odom_z_pos = goal.trajectory.points[t].positions[goal_odom_z_joint_index] - self._state.actual.positions[2]
+      error_odom_z_pos = shortest_angular_distance(goal.trajectory.points[t].positions[goal_odom_z_joint_index], self._state.actual.positions[2])
 
       error_odom_x_vel = goal.trajectory.points[t].velocities[goal_odom_x_joint_index] - self._state.actual.velocities[0]
       error_odom_y_vel = goal.trajectory.points[t].velocities[goal_odom_y_joint_index] - self._state.actual.velocities[1]
@@ -187,11 +192,12 @@ class BaseControl(object):
         v_y = 0
         v_z = 0
         t = -1
+        t_finish +=1
         
       # add feedback control
-      v_x += 0.5 * error_odom_x_pos + 0.1 * error_odom_x_vel
-      v_y += 0.5 * error_odom_y_pos + 0.1 * error_odom_y_vel
-      v_z += 0.05 * error_odom_z_pos + 0.2 * error_odom_z_vel
+      v_x += 0.5 * error_odom_x_pos + 0.5 * error_odom_x_vel
+      v_y += 0.5 * error_odom_y_pos + 0.5 * error_odom_y_vel
+      v_z += 0.0 * error_odom_z_pos + 0.0 * error_odom_z_vel
 
       # transform velocities from map fram to base frame
       sin_z = math.sin(self._state.actual.positions[2])
