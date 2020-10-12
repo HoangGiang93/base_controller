@@ -41,13 +41,13 @@ class BaseControl(object):
     self.state_sub = rospy.Subscriber('base/joint_states', JointState, self.joint_states_callback, queue_size=10)
 
     # error_pos
-    self.error_pos = [0,0,0]
+    self.error_traj = [0,0,0]
 
     # create the action server
     self._as = actionlib.SimpleActionServer('{}/follow_joint_trajectory'.format(name_space), FollowJointTrajectoryAction, self.goal_callback, False)
     self._as.start()
 
-  def calc_odom_origin(self):
+  def get_odom_origin(self):
     try:
       self.tf_listener.waitForTransform("map", "odom", rospy.Time(), rospy.Duration(10))
     except TransformException as e:
@@ -57,55 +57,42 @@ class BaseControl(object):
     return self.tf_listener.lookupTransform("map", "odom", t)
 
   def joint_states_callback(self, joint_states):
+    # joint_states is based on odom, however when a goal is received, the robot will move, odom will be moved so joint_states must be based on odom_origin
     try:
       self.tf_listener.waitForTransform("odom_origin", "base_footprint", rospy.Time(), rospy.Duration(1))
       self.tf_listener.waitForTransform("base_footprint", "base_footprint_goal", rospy.Time(), rospy.Duration(1))
-    except TransformException as e:
-      # rospy.logwarn("base_controller couldn't find odom_origin frame, use odom frame instead")
 
+    except TransformException as e:
+      # rospy.logwarn("base_controller couldn't find odom_origin frame, use odom frame instead") # for debug
+      # base_controller couldn't find odom_origin frame, so odom frame will be used for joint_states
       t = self.tf_listener.getLatestCommonTime("odom", "base_footprint")
       position, quaternion = self.tf_listener.lookupTransform("odom", "base_footprint", t)
       euler = tf.transformations.euler_from_quaternion(quaternion)
       self._state.actual.positions = [position[0], position[1], euler[2]]
 
-      try:
-        self._state.actual.velocities = [joint_states.velocity[self.odom_x_joint_index], joint_states.velocity[self.odom_y_joint_index], joint_states.velocity[self.odom_z_joint_index]]
-        # rospy.loginfo("base_controller found odom joint velocities")
-      except IndexError as e:
-        rospy.logwarn("base_controller couldn't find enough odom joint velocities in joint states!")
-        return
-        
-      self._state.header.stamp = rospy.Time.now()
-      self._state.header.frame_id = joint_states.header.frame_id
-      self._state.joint_names = joint_states.name
-      self.state_pub.publish(self._state)
-      return
-      
-    t = self.tf_listener.getLatestCommonTime("odom_origin", "base_footprint")
-    position, quaternion = self.tf_listener.lookupTransform("odom_origin", "base_footprint", t)
-    euler = tf.transformations.euler_from_quaternion(quaternion)
-    pos_z = euler[2]
-    if self._state.actual.positions[2] - pos_z > math.pi:
-      pos_z += 2 * math.pi
-    elif self._state.actual.positions[2] - pos_z < -math.pi:
-      pos_z -= 2 * math.pi
-    self._state.actual.positions = [position[0], position[1], pos_z]
+    else:
+      # joint_states makes the transformation from odom_origin to base_footprint
+      t = self.tf_listener.getLatestCommonTime("odom_origin", "base_footprint")
+      position, quaternion = self.tf_listener.lookupTransform("odom_origin", "base_footprint", t)
+      euler = tf.transformations.euler_from_quaternion(quaternion)
+      self._state.actual.positions = [position[0], position[1], euler[2]]
 
-    t = self.tf_listener.getLatestCommonTime("base_footprint", "base_footprint_goal")
-    position, quaternion = self.tf_listener.lookupTransform("base_footprint", "base_footprint_goal", t)
-    euler = tf.transformations.euler_from_quaternion(quaternion)
-
-    self.error_pos[0] = position[0]
-    self.error_pos[1] = position[1]
-    self.error_pos[2] = euler[2]
+      # error_traj is the transformation from base_footprint to base_footprint_goal
+      t = self.tf_listener.getLatestCommonTime("base_footprint", "base_footprint_goal")
+      position, quaternion = self.tf_listener.lookupTransform("base_footprint", "base_footprint_goal", t)
+      euler = tf.transformations.euler_from_quaternion(quaternion)
+      self.error_traj[0] = position[0]
+      self.error_traj[1] = position[1]
+      self.error_traj[2] = euler[2]
 
     try:
       self._state.actual.velocities = [joint_states.velocity[self.odom_x_joint_index], joint_states.velocity[self.odom_y_joint_index], joint_states.velocity[self.odom_z_joint_index]]
-      # rospy.loginfo("base_controller found odom joint velocities")
     except IndexError as e:
       rospy.logwarn("base_controller couldn't find enough odom joint velocities in joint states!")
+      self._as.set_aborted()
       return
     
+    # publish joint_states
     self._state.header.stamp = rospy.Time.now()
     self._state.header.frame_id = joint_states.header.frame_id
     self._state.joint_names = joint_states.name
@@ -114,7 +101,7 @@ class BaseControl(object):
   def goal_callback(self, goal):
     # helper variables
     success = True
-    rate = rospy.Rate(20)
+    rate = rospy.Rate(50)
     
     try:
       goal_odom_x_joint_index = goal.trajectory.joint_names.index(odom_x_joint)
@@ -125,18 +112,13 @@ class BaseControl(object):
       self._as.set_aborted()
       return
 
-    odom_origin_pos, odom_origin_quat = self.calc_odom_origin()
+    odom_origin_pos, odom_origin_quat = self.get_odom_origin()
 
-    # initialize cmd_vel and time index t
+    # initialization
     cmd_vel = Twist()
     t = 0
     t_finish = 0
-
     time_start = rospy.Time.now()
-
-    self._state.actual.positions[2] = self._state.actual.positions[2] % (2 * math.pi)
-    if self._state.actual.positions[2] > math.pi:
-      self._state.actual.positions[2] -= 2 * math.pi
 
     while True:
       if self._as.is_preempt_requested():
@@ -146,6 +128,30 @@ class BaseControl(object):
         success = False
         break
 
+      time_from_start = rospy.Time.now() - time_start
+
+      # set goal velocites in map frame
+      if t < len(goal.trajectory.points) and t >= 0:
+        for point_index in range(t,len(goal.trajectory.points)):
+          if goal.trajectory.points[point_index].time_from_start < time_from_start:
+            t += 1
+          else:
+            break
+
+      if t == len(goal.trajectory.points):
+        t = -1
+        time_finish = rospy.Time.now()
+
+      if t == -1:
+        time_from_finish = rospy.Time.now() - time_finish
+        if time_from_finish.secs > 10:
+          success = True
+          break
+
+      v_x = goal.trajectory.points[t].velocities[goal_odom_x_joint_index]
+      v_y = goal.trajectory.points[t].velocities[goal_odom_y_joint_index]
+      v_z = goal.trajectory.points[t].velocities[goal_odom_z_joint_index]
+      
       self.tf_broadcaster.sendTransform(odom_origin_pos,
         odom_origin_quat,
         rospy.Time.now(),
@@ -161,21 +167,20 @@ class BaseControl(object):
         "odom_origin")
 
       # goal error
-      error = [[goal.trajectory.points[-1].positions[i] - self._state.actual.positions[i] for i in range(3)], [goal.trajectory.points[-1].velocities[i] - self._state.actual.velocities[i] for i in range(3)]]
-      # print("At " + str(t) + ": error = " + str(error))
-      if sum([abs(error[i][j]) for i in range(2) for j in range(3)]) < 0.01:
-        success = True
-        break
+      if t == -1:
+        if abs(self.error_traj[0]) + abs(self.error_traj[1]) + abs(self.error_traj[2]) < 0.001:
+          success = True
+          break
+      print("At " + str(t) + ": error_traj = " + str(self.error_traj))
 
-      error_odom_x_pos = self.error_pos[0]
-      error_odom_y_pos = self.error_pos[1]
-      error_odom_z_pos = self.error_pos[2]
+      error_odom_x_pos = self.error_traj[0]
+      error_odom_y_pos = self.error_traj[1]
+      error_odom_z_pos = self.error_traj[2]
 
       error_odom_x_vel = goal.trajectory.points[t].velocities[goal_odom_x_joint_index] - self._state.actual.velocities[0]
       error_odom_y_vel = goal.trajectory.points[t].velocities[goal_odom_y_joint_index] - self._state.actual.velocities[1]
       error_odom_z_vel = goal.trajectory.points[t].velocities[goal_odom_z_joint_index] - self._state.actual.velocities[2]
 
-      time_from_start = rospy.Time.now() - time_start
       self._feedback.feedback.header.stamp = rospy.Time.now()
       self._feedback.feedback.header.frame_id = self._state.header.frame_id
       self._feedback.feedback.joint_names = self._state.joint_names
@@ -191,42 +196,13 @@ class BaseControl(object):
       
       # publish the feedback
       self._as.publish_feedback(self._feedback.feedback)
-      
-      # set goal velocites in map frame
-      if t < len(goal.trajectory.points) and t >= 0:
-        v_x = goal.trajectory.points[t].velocities[goal_odom_x_joint_index]
-        v_y = goal.trajectory.points[t].velocities[goal_odom_y_joint_index]
-        v_z = goal.trajectory.points[t].velocities[goal_odom_z_joint_index]
-        t += 1
 
-      if t == -1:
-        time_from_finish = rospy.Time.now() - time_finish
-        if time_from_finish.secs > 5:
-          success = True
-          break
-
-      if t == len(goal.trajectory.points):
-        v_x = 0
-        v_y = 0
-        v_z = 0
-        t = -1
-        time_finish = rospy.Time.now() 
-
-      # goal error
-      error = [self.error_pos, [goal.trajectory.points[t].velocities[i] - self._state.actual.velocities[i] for i in range(3)]]
-      print("At " + str(t) + ": error = " + str(error))
-      
-      # add feedback control
-      v_x += 0.5 * error_odom_x_pos + 0.5 * error_odom_x_vel
-      v_y += 0.5 * error_odom_y_pos + 0.5 * error_odom_y_vel
-      v_z += 0.5 * error_odom_z_pos + 0.1 * error_odom_z_vel
-
-      # transform velocities from map frame to base frame
+      # transform velocities from map frame to base frame and add feedback control
       sin_z = math.sin(self._state.actual.positions[2])
       cos_z = math.cos(self._state.actual.positions[2])
-      cmd_vel.linear.x = v_x * cos_z + v_y * sin_z
-      cmd_vel.linear.y = -v_x * sin_z + v_y * cos_z
-      cmd_vel.angular.z = v_z
+      cmd_vel.linear.x = v_x * cos_z + v_y * sin_z + 2 * error_odom_x_pos + 0.5 * error_odom_x_vel
+      cmd_vel.linear.y = -v_x * sin_z + v_y * cos_z + 2 * error_odom_y_pos + 0.5 * error_odom_y_vel
+      cmd_vel.angular.z = v_z + 2 * error_odom_z_pos + 0.5 * error_odom_z_vel
 
       # publish the velocity
       self.cmd_vel_pub.publish(cmd_vel)
