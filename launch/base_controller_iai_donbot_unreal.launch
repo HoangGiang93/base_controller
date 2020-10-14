@@ -1,6 +1,6 @@
 <launch>
     <arg name="name_space" default="iai_donbot/whole_body_controller/base"/>
-    <rosparam command="load" ns="iai_donbot" file="$(find base_controller)/config/base_controller.yaml" />
+    <rosparam command="load" ns="iai_donbot" file="$(find base_controller)/config/base_controller_iai_donbot.yaml" />
     <node pkg="base_controller" type="base_controller.py" name="base_controller" output="screen">
         <remap from="~/cmd_vel" to="/base_controller/command"/>
  	    <remap from="/base/joint_states" to="/iai_donbot/base/joint_states"/> 

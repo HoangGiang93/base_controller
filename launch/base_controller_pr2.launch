@@ -1,6 +1,6 @@
 <launch>
     <arg name="name_space" default="whole_body_controller/base"/>
-    <rosparam command="load" file="$(find base_controller)/config/base_controller.yaml" />
+    <rosparam command="load" file="$(find base_controller)/config/base_controller_pr2.yaml" />
     <node pkg="base_controller" type="base_controller_pr2.py" name="base_controller" output="screen">
         <remap from="~cmd_vel" to="/base_controller/command"/>
 	<remap from="robot_description" to="giskard/robot_description"/>
