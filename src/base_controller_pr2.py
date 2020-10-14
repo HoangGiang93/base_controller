@@ -49,12 +49,12 @@ class BaseControl(object):
 
   def get_odom_origin(self):
     try:
-      self.tf_listener.waitForTransform("map", "odom", rospy.Time(), rospy.Duration(10))
+      self.tf_listener.waitForTransform("map", "odom_combined", rospy.Time(), rospy.Duration(10))
     except TransformException as e:
       rospy.logwarn("base_controller couldn't find odom frame")
 
-    t = self.tf_listener.getLatestCommonTime("map", "odom")
-    return self.tf_listener.lookupTransform("map", "odom", t)
+    t = self.tf_listener.getLatestCommonTime("map", "odom_combined")
+    return self.tf_listener.lookupTransform("map", "odom_combined", t)
 
   def joint_states_callback(self, joint_states):
     # joint_states is based on odom, however when a goal is received, the robot will move, odom will be moved so joint_states must be based on odom_origin
@@ -65,8 +65,8 @@ class BaseControl(object):
     except TransformException as e:
       # rospy.logwarn("base_controller couldn't find odom_origin frame, use odom frame instead") # for debug
       # base_controller couldn't find odom_origin frame, so odom frame will be used for joint_states
-      t = self.tf_listener.getLatestCommonTime("odom", "base_footprint")
-      position, quaternion = self.tf_listener.lookupTransform("odom", "base_footprint", t)
+      t = self.tf_listener.getLatestCommonTime("odom_combined", "base_footprint")
+      position, quaternion = self.tf_listener.lookupTransform("odom_combined", "base_footprint", t)
       euler = tf.transformations.euler_from_quaternion(quaternion)
       self._state.actual.positions = [position[0], position[1], euler[2]]
 
@@ -101,7 +101,9 @@ class BaseControl(object):
   def goal_callback(self, goal):
     # helper variables
     success = True
-    rate = rospy.Rate(50)
+    f = 50.0
+    delta_T = 1/f
+    rate = rospy.Rate(f)
     
     try:
       goal_odom_x_joint_index = goal.trajectory.joint_names.index(odom_x_joint)
@@ -118,8 +120,9 @@ class BaseControl(object):
     cmd_vel = Twist()
     t = 0
     t_finish = 0
-    time_start = goal.trajectory.header.stamp
-
+    T = 0.5
+    time_start = goal.trajectory.header.stamp - rospy.Duration(T)
+    
     while True:
       if self._as.is_preempt_requested():
         rospy.loginfo("The goal has been preempted")
@@ -144,7 +147,7 @@ class BaseControl(object):
 
       if t == -1:
         time_from_finish = rospy.Time.now() - time_finish
-        if time_from_finish.secs > 10:
+        if time_from_finish.secs > 1:
           success = True
           break
 
@@ -200,9 +203,15 @@ class BaseControl(object):
       # transform velocities from map frame to base frame and add feedback control
       sin_z = math.sin(self._state.actual.positions[2])
       cos_z = math.cos(self._state.actual.positions[2])
-      cmd_vel.linear.x = v_x * cos_z + v_y * sin_z + 2 * error_odom_x_pos + 0.5 * error_odom_x_vel
-      cmd_vel.linear.y = -v_x * sin_z + v_y * cos_z + 2 * error_odom_y_pos + 0.5 * error_odom_y_vel
-      cmd_vel.angular.z = v_z + 2 * error_odom_z_pos + 0.5 * error_odom_z_vel
+      
+      cmd_vel_x = v_x * cos_z + v_y * sin_z + 2 * error_odom_x_pos + 0.5 * error_odom_x_vel
+      cmd_vel_y = -v_x * sin_z + v_y * cos_z + 2 * error_odom_y_pos + 0.5 * error_odom_y_vel
+      cmd_vel_z = v_z + 2 * error_odom_z_pos + 0.5 * error_odom_z_vel
+
+      cmd_vel.linear.x = T/(T+delta_T) * cmd_vel.linear.x + delta_T/(T+delta_T) * cmd_vel_x
+      cmd_vel.linear.y = T/(T+delta_T) * cmd_vel.linear.y + delta_T/(T+delta_T) * cmd_vel_y
+      cmd_vel.angular.z = T/(T+delta_T) * cmd_vel.angular.z + delta_T/(T+delta_T) * cmd_vel_z
+
 
       # publish the velocity
       self.cmd_vel_pub.publish(cmd_vel)
