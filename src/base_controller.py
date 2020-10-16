@@ -107,7 +107,7 @@ class BaseControl(object):
     s_x = sum([abs(goal.trajectory.points[t].velocities[goal_odom_x_joint_index]) for t in range(L)])
     s_y = sum([abs(goal.trajectory.points[t].velocities[goal_odom_y_joint_index]) for t in range(L)])
     s_z = sum([abs(goal.trajectory.points[t].velocities[goal_odom_z_joint_index]) for t in range(L)])
-    if s_x < S_x and S_y < 0.01 and S_z < 0.01: # path is too short
+    if s_x < S_x and s_y < S_y and s_z < S_z: # path is too short
       rospy.loginfo("The goal has been reached")
       self._result.result.error_string = "no error"
       self._as.set_succeeded(self._result.result)
