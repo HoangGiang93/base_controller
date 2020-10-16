@@ -101,6 +101,17 @@ class BaseControl(object):
       rospy.loginfo("base_controller aborted current goal")
       self._as.set_aborted()
       return
+    
+    # check if the path is not too short
+    L = len(goal.trajectory.points)
+    s_x = sum([abs(goal.trajectory.points[t].velocities[goal_odom_x_joint_index]) for t in range(L)])
+    s_y = sum([abs(goal.trajectory.points[t].velocities[goal_odom_y_joint_index]) for t in range(L)])
+    s_z = sum([abs(goal.trajectory.points[t].velocities[goal_odom_z_joint_index]) for t in range(L)])
+    if s_x < S_x and S_y < 0.01 and S_z < 0.01: # path is too short
+      rospy.loginfo("The goal has been reached")
+      self._result.result.error_string = "no error"
+      self._as.set_succeeded(self._result.result)
+      return
 
     # initialization
     cmd_vel = Twist()
@@ -120,20 +131,20 @@ class BaseControl(object):
       time_from_start = rospy.Time.now() - time_start 
 
       # set goal velocites in map frame
-      if t < len(goal.trajectory.points) and t >= 0:
-        for point_index in range(t,len(goal.trajectory.points)):
+      if t < L and t >= 0:
+        for point_index in range(t,L):
           if goal.trajectory.points[point_index].time_from_start < time_from_start:
             t += 1
           else:
             break
 
-      if t == len(goal.trajectory.points):
+      if t == L:
         t = -1
         time_finish = rospy.Time.now()
 
       if t == -1:
         time_from_finish = rospy.Time.now() - time_finish
-        if time_from_finish.secs > 10:
+        if time_from_finish.secs > T_finish:
           success = True
           break
 
@@ -220,6 +231,9 @@ if __name__ == '__main__':
   freq = rospy.get_param('{}/freq'.format(name_space))
   T_delay = rospy.get_param('{}/T_delay'.format(name_space))
   T_finish = rospy.get_param('{}/T_finish'.format(name_space))
+  S_x = rospy.get_param('{}/S_x'.format(name_space))
+  S_y = rospy.get_param('{}/S_y'.format(name_space))
+  S_z = rospy.get_param('{}/S_z'.format(name_space))
 
   # publish info to the console for the user
   rospy.loginfo("base_controller starts")

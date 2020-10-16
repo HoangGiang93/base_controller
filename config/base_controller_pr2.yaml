@@ -13,3 +13,6 @@ whole_body_controller/base:
   freq: 50.0
   T_delay: 0.5
   T_finish: 1.0
+  S_x: 0.01
+  S_y: 0.01
+  S_z: 0.01
