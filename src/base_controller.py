@@ -168,7 +168,7 @@ class BaseControl(object):
         if abs(error_odom_x_pos) + abs(error_odom_y_pos) + abs(error_odom_z_pos) < 0.001:
           success = True
           break
-      print("At " + str(t) + ": error_traj = " + str([error_odom_x_pos, error_odom_y_pos, error_odom_z_pos]))
+      # print("At " + str(t) + ": error_traj = " + str([error_odom_x_pos, error_odom_y_pos, error_odom_z_pos]))
 
       error_odom_x_vel = goal.trajectory.points[t].velocities[goal_odom_x_joint_index] - self._state.actual.velocities[0]
       error_odom_y_vel = goal.trajectory.points[t].velocities[goal_odom_y_joint_index] - self._state.actual.velocities[1]
@@ -211,7 +211,7 @@ class BaseControl(object):
     self.cmd_vel_pub.publish(Twist())
 
     if success:
-      rospy.loginfo("The goal has been reached")
+      rospy.loginfo("The goal has been reached, final diff: {}".format([error_odom_x_pos, error_odom_y_pos, error_odom_z_pos]))
       self._result.result.error_string = "no error"
       self._as.set_succeeded(self._result.result)
     else:
