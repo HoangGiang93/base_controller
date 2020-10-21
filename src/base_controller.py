@@ -59,12 +59,12 @@ class BaseControl(object):
 
   def joint_states_callback(self, joint_states):
     try:
-      self.tf_listener.waitForTransform("map", "base_footprint", rospy.Time(), rospy.Duration(1))
+      self.tf_listener.waitForTransform("map", base, rospy.Time(), rospy.Duration(1))
     except TransformException as e:
       rospy.logwarn("base_controller couldn't find map frame or base_footprint frame")
     else:
-      t = self.tf_listener.getLatestCommonTime("map", "base_footprint")
-      pos, quat = self.tf_listener.lookupTransform("map", "base_footprint", t)
+      t = self.tf_listener.getLatestCommonTime("map", base)
+      pos, quat = self.tf_listener.lookupTransform("map", base, t)
       map_T_base_footprint = PyKDL.Frame(PyKDL.Rotation.Quaternion(quat[0], quat[1], quat[2], quat[3]), PyKDL.Vector(pos[0], pos[1], pos[2]))
 
       odom_origin_T_map = self.map_T_odom_origin.Inverse()
@@ -225,6 +225,7 @@ if __name__ == '__main__':
   odom_z_joint = rospy.get_param('{}/odom_z_joint'.format(name_space))
 
   odom = rospy.get_param('{}/odom_frame'.format(name_space))
+  base = rospy.get_param('{}/base_frame'.format(name_space))
   K_x = rospy.get_param('{}/K_x'.format(name_space))
   K_y = rospy.get_param('{}/K_y'.format(name_space))
   K_z = rospy.get_param('{}/K_z'.format(name_space))

@@ -7,6 +7,7 @@ whole_body_controller/base:
     - *odom_y_joint
     - *odom_z_joint
   odom_frame: odom
+  base_frame: base_footprint
   K_x: {p: 1.5, d: 0.7}
   K_y: {p: 1.5, d: 0.7}
   K_z: {p: 1.5, d: 0.7}
