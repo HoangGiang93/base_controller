@@ -5,7 +5,7 @@ import actionlib
 
 from control_msgs.msg import JointTrajectoryControllerState
 from control_msgs.msg import FollowJointTrajectoryAction, FollowJointTrajectoryActionFeedback, FollowJointTrajectoryActionResult, FollowJointTrajectoryActionGoal
-from geometry_msgs.msg import Twist, Pose, Quaternion, TransformStamped
+from geometry_msgs.msg import Twist, Pose, Quaternion, PoseStamped
 from sensor_msgs.msg import JointState
 import tf
 from tf2_ros import TransformException
@@ -15,6 +15,7 @@ import math
 
 class BaseControl(object):
   # create messages that are used to publish state/feedback/result
+  _pose_stamped = PoseStamped()
   _state = JointTrajectoryControllerState()
   _feedback = FollowJointTrajectoryActionFeedback()
   _result = FollowJointTrajectoryActionResult()
@@ -43,6 +44,10 @@ class BaseControl(object):
     self.state_pub = rospy.Publisher('{}/state'.format(name_space), JointTrajectoryControllerState, queue_size=10)
     self.state_sub = rospy.Subscriber('base/joint_states', JointState, self.joint_states_callback, queue_size=10)
 
+    # create pose stamped publisher
+    self.pose_stamped_pub = rospy.Publisher(
+        '{}/pose_stamped'.format(name_space), PoseStamped, queue_size=10)
+
     # create the action server
     self._as = actionlib.SimpleActionServer('{}/follow_joint_trajectory'.format(name_space), FollowJointTrajectoryAction, self.goal_callback, False)
     self._as.start()
@@ -66,6 +71,19 @@ class BaseControl(object):
       t = self.tf_listener.getLatestCommonTime("map", base)
       pos, quat = self.tf_listener.lookupTransform("map", base, t)
       map_T_base_footprint = PyKDL.Frame(PyKDL.Rotation.Quaternion(quat[0], quat[1], quat[2], quat[3]), PyKDL.Vector(pos[0], pos[1], pos[2]))
+
+      # publish pose_stamped
+      self._pose_stamped.header.seq += 1
+      self._pose_stamped.header.stamp = rospy.Time.now()
+      self._pose_stamped.header.frame_id = "map"
+      self._pose_stamped.pose.position.x = pos[0]
+      self._pose_stamped.pose.position.y = pos[1]
+      self._pose_stamped.pose.position.z = pos[2]
+      self._pose_stamped.pose.orientation.x = quat[0]
+      self._pose_stamped.pose.orientation.y = quat[1]
+      self._pose_stamped.pose.orientation.z = quat[2]
+      self._pose_stamped.pose.orientation.w = quat[3]
+      self.pose_stamped_pub.publish(self._pose_stamped)
 
       odom_origin_T_map = self.map_T_odom_origin.Inverse()
       self.odom_origin_T_base_footprint = odom_origin_T_map * map_T_base_footprint
