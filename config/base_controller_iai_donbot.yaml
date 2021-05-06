@@ -12,8 +12,8 @@ whole_body_controller/base:
   K_y: {p: 1.5, d: 0.7}
   K_z: {p: 1.5, d: 0.7}
   freq: 50.0
-  T_delay: 0.0
-  T_finish: 1.0
+  T_delay: 0.01
+  T_finish: 0.5
   S_x: 0.01
   S_y: 0.01
   S_z: 0.01
